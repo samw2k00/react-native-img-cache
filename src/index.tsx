@@ -64,12 +64,17 @@ export class ImageCache {
             });
         }
     }
-    bust(uri) {
+    bust(uri, headers, suppessError) {
         const cache = this.cache[uri];
         if (cache !== undefined && !cache.immutable) {
             let path = this.getPath(uri, false)
-            RNFetchBlob.fs.unlink(path)
             cache.path = undefined;
+            if( suppessError) {
+                cache.suppessError = suppessError
+            }
+            if(headers){
+                cache.source.headers = headers
+            }
             this.get(uri);
         }
     }
@@ -96,7 +101,7 @@ export class ImageCache {
                     // this is mean its not a 200 response from server, do not link the file to the cache
                     RNFetchBlob.fs.unlink(path);
                     // notify the listener that there is an errorMessage
-                    this.notify(uri, "Unable to download image: " + uri + " with status of: " + res.respInfo.status)
+                    this.notify(uri, res)
                 }
 
             }).catch(() => {
@@ -123,11 +128,11 @@ export class ImageCache {
             this.download(cache);
         }
     }
-    notify(uri, errorMessage) {
+    notify(uri, errorResponse) {
         const handlers = this.cache[uri].handlers;
         handlers.forEach(handler => {
-            if (errorMessage) {
-                handler(null, errorMessage);
+            if (errorResponse) {
+                handler(null, errorResponse, this.cache[uri].suppessError);
             } else {
                 handler(this.cache[uri].path);
             }
@@ -137,19 +142,26 @@ export class ImageCache {
 export class BaseCachedImage extends Component {
     constructor() {
         super();
-        this.handler = (path, error) => {
+        this.handler = (path, error, suppessError) => {
             if (error) {
-                this.bubbleEvent('onError', {errorCode: 401, errorMessage: error});
+                console.log("Failed to load image with suppessError", suppessError)
+                if(suppessError !== true){
+                    this.bubbleEvent('onError', {error});
+                }
+                this.setState({ error })
+                
             } else {
-                this.setState({ path });
+                this.setState({ path, error: undefined });
             }
 
         };
-        this.state = { path: undefined, error: null };
+        this.state = { path: undefined, error: undefined };
     }
 
     bubbleEvent(propertyName, event) {
+
       if (typeof this.props[propertyName] === 'function') {
+        
         this.props[propertyName](event);
       }
     }
@@ -175,6 +187,7 @@ export class BaseCachedImage extends Component {
             else if (["mutable", "component"].indexOf(prop) === -1) {
                 props[prop] = this.props[prop];
             }
+            props["cacheError"] = this.state.error ? this.state.error : null
         });
         return props;
     }
