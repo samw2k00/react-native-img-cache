@@ -46,7 +46,8 @@ export class ImageCache {
                 downloading: false,
                 handlers: [handler],
                 immutable: immutable === true,
-                path: immutable === true ? this.getPath(uri, immutable) : undefined
+                path: immutable === true ? this.getPath(uri, immutable) : undefined,
+                attemptCount:0
             };
         }
         else {
@@ -75,6 +76,7 @@ export class ImageCache {
             if (headers) {
                 cache.source.headers = headers
             }
+            
             this.get(uri);
         }
     }
@@ -87,77 +89,103 @@ export class ImageCache {
     download(cache) {
         const { source } = cache;
         const { uri } = source;
+        cache.attemptCount +=1
         if (!cache.downloading) {
             const path = this.getPath(uri, cache.immutable);
             cache.downloading = true;
-            this.notify(true, uri);
+            this.notify(uri)
+            // console.log("downloading image")
             const method = source.method ? source.method : "GET";
-            cache.task = RNFetchBlob.config({ path }).fetch(method, uri, source.headers);
-            cache.task.then((res) => {
-                cache.downloading = false;
-                if (res.respInfo.status === 200) {
-                    cache.path = path;
-                    this.notify(false, uri);
-                } else {
-                    // this is mean its not a 200 response from server, do not link the file to the cache
-                    console.info("Downloading :" + uri + " with status: " + res.respInfo.status)
-                    RNFetchBlob.fs.unlink(path);
-                    cache.path = null;
-                    // notify the listener that there is an errorMessage
-                    this.notify(false, uri, res)
-                }
-
-            }).catch(() => {
+            let undoAttemptAndRetryAgainLater = () => {
+                // internet was not available
+                cache.attemptCount = 0
                 cache.downloading = false;
                 // Parts of the image may have been downloaded already, (see https://github.com/wkh237/react-native-fetch-blob/issues/331)
                 RNFetchBlob.fs.unlink(path);
-            });
+                setTimeout(()=>this.notify(uri, {message: "Unable to download image for technical reason", status: "INTERNET_DOWN_OR_SERVER_UNAVAILABLE"}), 15000); // delay this for 15 secs
+            }
+            cache.task = RNFetchBlob.config({ path }).fetch(method, uri, source.headers);
+            cache.task.then((res) => {
+                // console.log("downloading image successfully")
+                cache.downloading = false;
+                if (res.respInfo.status === 200) {
+                    cache.path = path;
+                    this.notify(uri);
+                } else {
+                    if (res.respInfo.status === 202) {
+                        return undoAttemptAndRetryAgainLater();
+                    }
+                    // this is mean its not a 200 response from server, do not link the file to the cache
+                    // console.info("Downloading :" + uri + " with status: " + res.respInfo.status)
+                    RNFetchBlob.fs.unlink(path);
+                    // only suppress error if not 401 (i.e. let a handler try to re-auth)...
+                    cache.suppessError = res.respInfo.status !== 401;
+                    cache.errorCode = res.respInfo.status
+                    // notify the listener that there is an errorMessage
+                    this.notify(uri, res)
+                }
+
+            }).catch(undoAttemptAndRetryAgainLater);
         }
     }
     get(uri) {
         const cache = this.cache[uri];
+        // console.log("Come into cache path", cache)
         if (cache.path) {
+            // console.log("Come into cache path")
             // We check here if IOS didn't delete the cache content
             RNFetchBlob.fs.exists(cache.path).then((exists) => {
                 if (exists) {
-                    this.notify(false, uri);
+                    this.notify(uri);
                 }
                 else {
+                    // console.log("come into cache and not found in cache so need to redownload", cache.source.headers)
                     this.download(cache);
                 }
             });
         }
         else {
-            this.download(cache);
+            // file path doesn't exist in cache yet...
+            if (cache.attemptCount === 0) {
+                // if first attempt, always download...
+                this.download(cache);
+            } else if (cache.errorCode === 401 && cache.attemptCount == 1) {
+                // if second attempt, and first attempt was unauthorized, retry download...
+                this.download(cache);
+            } else {
+                // don't download, display default...
+                this.notify(uri, cache.error)
+            }
         }
     }
-    notify(isLoading, uri, errorResponse) {
-        const handlers = this.cache[uri].handlers;
+    notify( uri, errorResponse) {
+        let cache = this.cache[uri]
+        cache.error = errorResponse
+        const handlers = cache.handlers;
         handlers.forEach(handler => {
-            if (errorResponse) {
-                handler(isLoading, null, errorResponse, this.cache[uri].suppessError);
-            } else {
-                handler(isLoading, this.cache[uri].path);
-            }
+            handler(cache);
         });
     }
 }
 export class BaseCachedImage extends Component {
     constructor() {
         super();
-        this.handler = (isLoading, path, error, suppessError) => {
-            if (error) {
-                if (suppessError !== true) {
-                    this.bubbleEvent('onError', { error });
+        this.handler = ( cache ) => {
+            if (cache.error) {
+                // console.log("Got error trying to update")
+                if (cache.suppessError !== true) {
+                    // bubble the event to handle token refresh...
+                    // console.log("Bubble event to top")
+                    this.bubbleEvent('onError', { error: cache.error });
                 }
-                this.setState({ isLoading, error })
+                this.setState({ error: cache.error, isLoading: cache.downloading })
 
             } else {
-                this.setState({ isLoading, path, error: undefined });
+                this.setState({ path: cache.path, error: undefined, isLoading: cache.downloading });
             }
 
         };
-        this.state = { isLoading: false, path: undefined, error: undefined };
+        this.state = { path: undefined, error: undefined, isLoading: false };
     }
 
     bubbleEvent(propertyName, event) {
