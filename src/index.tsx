@@ -69,10 +69,10 @@ export class ImageCache {
         if (cache !== undefined && !cache.immutable) {
             let path = this.getPath(uri, false)
             cache.path = undefined;
-            if( suppessError) {
+            if (suppessError) {
                 cache.suppessError = suppessError
             }
-            if(headers){
+            if (headers) {
                 cache.source.headers = headers
             }
             this.get(uri);
@@ -90,18 +90,21 @@ export class ImageCache {
         if (!cache.downloading) {
             const path = this.getPath(uri, cache.immutable);
             cache.downloading = true;
+            this.notify(true, uri);
             const method = source.method ? source.method : "GET";
             cache.task = RNFetchBlob.config({ path }).fetch(method, uri, source.headers);
             cache.task.then((res) => {
                 cache.downloading = false;
                 if (res.respInfo.status === 200) {
                     cache.path = path;
-                    this.notify(uri);
+                    this.notify(false, uri);
                 } else {
                     // this is mean its not a 200 response from server, do not link the file to the cache
+                    console.info("Downloading :" + uri + " with status: " + res.respInfo.status)
                     RNFetchBlob.fs.unlink(path);
+                    cache.path = null;
                     // notify the listener that there is an errorMessage
-                    this.notify(uri, res)
+                    this.notify(false, uri, res)
                 }
 
             }).catch(() => {
@@ -117,7 +120,7 @@ export class ImageCache {
             // We check here if IOS didn't delete the cache content
             RNFetchBlob.fs.exists(cache.path).then((exists) => {
                 if (exists) {
-                    this.notify(uri);
+                    this.notify(false, uri);
                 }
                 else {
                     this.download(cache);
@@ -128,13 +131,13 @@ export class ImageCache {
             this.download(cache);
         }
     }
-    notify(uri, errorResponse) {
+    notify(isLoading, uri, errorResponse) {
         const handlers = this.cache[uri].handlers;
         handlers.forEach(handler => {
             if (errorResponse) {
-                handler(null, errorResponse, this.cache[uri].suppessError);
+                handler(isLoading, null, errorResponse, this.cache[uri].suppessError);
             } else {
-                handler(this.cache[uri].path);
+                handler(isLoading, this.cache[uri].path);
             }
         });
     }
@@ -142,28 +145,27 @@ export class ImageCache {
 export class BaseCachedImage extends Component {
     constructor() {
         super();
-        this.handler = (path, error, suppessError) => {
+        this.handler = (isLoading, path, error, suppessError) => {
             if (error) {
-                console.log("Failed to load image with suppessError", suppessError)
-                if(suppessError !== true){
-                    this.bubbleEvent('onError', {error});
+                if (suppessError !== true) {
+                    this.bubbleEvent('onError', { error });
                 }
-                this.setState({ error })
-                
+                this.setState({ isLoading, error })
+
             } else {
-                this.setState({ path, error: undefined });
+                this.setState({ isLoading, path, error: undefined });
             }
 
         };
-        this.state = { path: undefined, error: undefined };
+        this.state = { isLoading: false, path: undefined, error: undefined };
     }
 
     bubbleEvent(propertyName, event) {
 
-      if (typeof this.props[propertyName] === 'function') {
-        
-        this.props[propertyName](event);
-      }
+        if (typeof this.props[propertyName] === 'function') {
+
+            this.props[propertyName](event);
+        }
     }
 
     dispose() {
@@ -187,8 +189,11 @@ export class BaseCachedImage extends Component {
             else if (["mutable", "component"].indexOf(prop) === -1) {
                 props[prop] = this.props[prop];
             }
-            props["cacheError"] = this.state.error ? this.state.error : null
         });
+        if (this.props.source.uri) {
+            props["cacheError"] = this.state.error ? this.state.error : null
+            props["cacheLoading"] = this.state.isLoading
+        }
         return props;
     }
     checkSource(source) {
