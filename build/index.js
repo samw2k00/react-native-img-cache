@@ -102,7 +102,7 @@ export class ImageCache {
                 cache.downloading = false;
                 // Parts of the image may have been downloaded already, (see https://github.com/wkh237/react-native-fetch-blob/issues/331)
                 RNFetchBlob.fs.unlink(path);
-                setTimeout(() => this.notify(uri, { message: "Unable to download image for technical reason", status: "INTERNET_DOWN_OR_SERVER_UNAVAILABLE" }), 15000); // delay this for 15 secs
+                setTimeout(() => this.notify(uri, { message: "Unable to download image for technical reason", status: "INTERNET_DOWN_OR_SERVER_UNAVAILABLE" }), 5000); // delay this for 5 secs
             };
             cache.task = RNFetchBlob.config({ path }).fetch(method, uri, source.headers);
             cache.task.then((res) => {
@@ -110,6 +110,7 @@ export class ImageCache {
                 cache.downloading = false;
                 if (res.respInfo.status === 200) {
                     cache.path = path;
+                    cache.error = null;
                     this.notify(uri);
                 }
                 else {
@@ -122,6 +123,7 @@ export class ImageCache {
                     // only suppress error if not 401 (i.e. let a handler try to re-auth)...
                     cache.suppessError = res.respInfo.status !== 401;
                     cache.errorCode = res.respInfo.status;
+                    cache.lastUpdatedTime = Date.now();
                     // notify the listener that there is an errorMessage
                     this.notify(uri, res);
                 }
@@ -154,6 +156,10 @@ export class ImageCache {
                 // if second attempt, and first attempt was unauthorized, retry download...
                 this.download(cache);
             }
+            else if (cache.errorCode === 401 && cache.attemptCount > 1 && cache.attemptCount < 10 && (Date.now() - cache.lastUpdatedTime > 60 * 1000)) {
+                // if the wait time is more then 1 mins, retry
+                this.download(cache);
+            }
             else {
                 // don't download, display default...
                 this.notify(uri, cache.error);
@@ -162,11 +168,13 @@ export class ImageCache {
     }
     notify(uri, errorResponse) {
         let cache = this.cache[uri];
-        cache.error = errorResponse;
-        const handlers = cache.handlers;
-        handlers.forEach(handler => {
-            handler(cache);
-        });
+        if (cache) {
+            cache.error = errorResponse;
+            const handlers = cache.handlers;
+            handlers.forEach(handler => {
+                handler(cache);
+            });
+        }
     }
 }
 export class BaseCachedImage extends Component {
@@ -267,5 +275,4 @@ export class CustomCachedImage extends BaseCachedImage {
         return React.createElement(Component, __assign({}, props), this.props.children);
     }
 }
-//# sourceMappingURL=index.js.map 
 //# sourceMappingURL=index.js.map

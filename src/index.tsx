@@ -1,8 +1,9 @@
 var __assign = (this && this.__assign) || Object.assign || function (t) {
     for (var s, i = 1, n = arguments.length; i < n; i++) {
         s = arguments[i];
-        for (var p in s) if (Object.prototype.hasOwnProperty.call(s, p))
-            t[p] = s[p];
+        for (var p in s)
+            if (Object.prototype.hasOwnProperty.call(s, p))
+                t[p] = s[p];
     }
     return t;
 };
@@ -47,7 +48,7 @@ export class ImageCache {
                 handlers: [handler],
                 immutable: immutable === true,
                 path: immutable === true ? this.getPath(uri, immutable) : undefined,
-                attemptCount:0
+                attemptCount: 0
             };
         }
         else {
@@ -68,15 +69,14 @@ export class ImageCache {
     bust(uri, headers, suppessError) {
         const cache = this.cache[uri];
         if (cache !== undefined && !cache.immutable) {
-            let path = this.getPath(uri, false)
+            let path = this.getPath(uri, false);
             cache.path = undefined;
             if (suppessError) {
-                cache.suppessError = suppessError
+                cache.suppessError = suppessError;
             }
             if (headers) {
-                cache.source.headers = headers
+                cache.source.headers = headers;
             }
-            
             this.get(uri);
         }
     }
@@ -89,29 +89,31 @@ export class ImageCache {
     download(cache) {
         const { source } = cache;
         const { uri } = source;
-        cache.attemptCount +=1
+        cache.attemptCount += 1;
         if (!cache.downloading) {
             const path = this.getPath(uri, cache.immutable);
             cache.downloading = true;
-            this.notify(uri)
+            this.notify(uri);
             // console.log("downloading image")
             const method = source.method ? source.method : "GET";
             let undoAttemptAndRetryAgainLater = () => {
                 // internet was not available
-                cache.attemptCount = 0
+                cache.attemptCount = 0;
                 cache.downloading = false;
                 // Parts of the image may have been downloaded already, (see https://github.com/wkh237/react-native-fetch-blob/issues/331)
                 RNFetchBlob.fs.unlink(path);
-                setTimeout(()=>this.notify(uri, {message: "Unable to download image for technical reason", status: "INTERNET_DOWN_OR_SERVER_UNAVAILABLE"}), 15000); // delay this for 15 secs
-            }
+                setTimeout(() => this.notify(uri, { message: "Unable to download image for technical reason", status: "INTERNET_DOWN_OR_SERVER_UNAVAILABLE" }), 5000); // delay this for 5 secs
+            };
             cache.task = RNFetchBlob.config({ path }).fetch(method, uri, source.headers);
             cache.task.then((res) => {
                 // console.log("downloading image successfully")
                 cache.downloading = false;
                 if (res.respInfo.status === 200) {
                     cache.path = path;
+                    cache.error = null
                     this.notify(uri);
-                } else {
+                }
+                else {
                     if (res.respInfo.status === 202) {
                         return undoAttemptAndRetryAgainLater();
                     }
@@ -120,11 +122,11 @@ export class ImageCache {
                     RNFetchBlob.fs.unlink(path);
                     // only suppress error if not 401 (i.e. let a handler try to re-auth)...
                     cache.suppessError = res.respInfo.status !== 401;
-                    cache.errorCode = res.respInfo.status
+                    cache.errorCode = res.respInfo.status;
+                    cache.lastUpdatedTime = Date.now()
                     // notify the listener that there is an errorMessage
-                    this.notify(uri, res)
+                    this.notify(uri, res);
                 }
-
             }).catch(undoAttemptAndRetryAgainLater);
         }
     }
@@ -149,28 +151,36 @@ export class ImageCache {
             if (cache.attemptCount === 0) {
                 // if first attempt, always download...
                 this.download(cache);
-            } else if (cache.errorCode === 401 && cache.attemptCount == 1) {
+            }
+            else if (cache.errorCode === 401 && cache.attemptCount == 1) {
                 // if second attempt, and first attempt was unauthorized, retry download...
                 this.download(cache);
-            } else {
+            }
+            else if (cache.errorCode === 401 && cache.attemptCount > 1 && cache.attemptCount < 10 && (Date.now() - cache.lastUpdatedTime > 60*1000) ){
+                // if the wait time is more then 1 mins, retry
+                this.download(cache);
+            } 
+            else {
                 // don't download, display default...
-                this.notify(uri, cache.error)
+                this.notify(uri, cache.error);
             }
         }
     }
-    notify( uri, errorResponse) {
-        let cache = this.cache[uri]
-        cache.error = errorResponse
-        const handlers = cache.handlers;
-        handlers.forEach(handler => {
-            handler(cache);
-        });
+    notify(uri, errorResponse) {
+        let cache = this.cache[uri];
+        if (cache) {
+            cache.error = errorResponse;
+            const handlers = cache.handlers;
+            handlers.forEach(handler => {
+                handler(cache);
+            });
+        }
     }
 }
 export class BaseCachedImage extends Component {
     constructor() {
         super();
-        this.handler = ( cache ) => {
+        this.handler = (cache) => {
             if (cache.error) {
                 // console.log("Got error trying to update")
                 if (cache.suppessError !== true) {
@@ -178,24 +188,19 @@ export class BaseCachedImage extends Component {
                     // console.log("Bubble event to top")
                     this.bubbleEvent('onError', { error: cache.error });
                 }
-                this.setState({ error: cache.error, isLoading: cache.downloading })
-
-            } else {
+                this.setState({ error: cache.error, isLoading: cache.downloading });
+            }
+            else {
                 this.setState({ path: cache.path, error: undefined, isLoading: cache.downloading });
             }
-
         };
         this.state = { path: undefined, error: undefined, isLoading: false };
     }
-
     bubbleEvent(propertyName, event) {
-
         if (typeof this.props[propertyName] === 'function') {
-
             this.props[propertyName](event);
         }
     }
-
     dispose() {
         if (this.uri) {
             ImageCache.get().dispose(this.uri, this.handler);
@@ -219,8 +224,8 @@ export class BaseCachedImage extends Component {
             }
         });
         if (this.props.source.uri) {
-            props["cacheError"] = this.state.error ? this.state.error : null
-            props["cacheLoading"] = this.state.isLoading
+            props["cacheError"] = this.state.error ? this.state.error : null;
+            props["cacheLoading"] = this.state.isLoading;
         }
         return props;
     }
@@ -270,4 +275,3 @@ export class CustomCachedImage extends BaseCachedImage {
         return React.createElement(Component, __assign({}, props), this.props.children);
     }
 }
-//# sourceMappingURL=index.js.map
