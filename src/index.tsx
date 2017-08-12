@@ -117,7 +117,9 @@ export class ImageCache {
                 }
                 else {
                     // console.log("GET here download 4", uri)
-                    if (res.respInfo.status === 202) {
+                    if (res.respInfo.status === 202 || res.respInfo.status === 429) {
+                        // cater for SNOW 202 and 429 when it reach max capacity
+                        // https://community.servicenow.com/community/service-automation-platform/blog/2016/12/21/http-202-from-a-web-service-call
                         // console.log("GET here download 5", uri)
                         return undoAttemptAndRetryAgainLater();
                     }

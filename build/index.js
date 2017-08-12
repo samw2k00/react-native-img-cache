@@ -94,9 +94,10 @@ export class ImageCache {
             const path = this.getPath(uri, cache.immutable);
             cache.downloading = true;
             this.notify(uri);
-            // console.log("downloading image")
+            // console.log("GET here download 1", uri)
             const method = source.method ? source.method : "GET";
             let undoAttemptAndRetryAgainLater = () => {
+                // console.log("GET here download 7", uri)
                 // internet was not available
                 cache.attemptCount = 0;
                 cache.downloading = false;
@@ -106,17 +107,23 @@ export class ImageCache {
             };
             cache.task = RNFetchBlob.config({ path }).fetch(method, uri, source.headers);
             cache.task.then((res) => {
-                // console.log("downloading image successfully")
+                // console.log("GET here download 2", uri)
                 cache.downloading = false;
                 if (res.respInfo.status === 200) {
+                    // console.log("GET here download 3", uri)
                     cache.path = path;
                     cache.error = null;
                     this.notify(uri);
                 }
                 else {
-                    if (res.respInfo.status === 202) {
+                    // console.log("GET here download 4", uri)
+                    if (res.respInfo.status === 202 || res.respInfo.status === 429) {
+                        // cater for SNOW 202 and 429 when it reach max capacity
+                        // https://community.servicenow.com/community/service-automation-platform/blog/2016/12/21/http-202-from-a-web-service-call
+                        // console.log("GET here download 5", uri)
                         return undoAttemptAndRetryAgainLater();
                     }
+                    // console.log("GET here download 6", uri, res.respInfo.status)
                     // this is mean its not a 200 response from server, do not link the file to the cache
                     // console.info("Downloading :" + uri + " with status: " + res.respInfo.status)
                     RNFetchBlob.fs.unlink(path);
@@ -132,37 +139,44 @@ export class ImageCache {
     }
     get(uri) {
         const cache = this.cache[uri];
-        // console.log("Come into cache path", cache)
+        // console.log("come here - GET 1", uri, cache)
         if (cache.path) {
-            // console.log("Come into cache path")
+            // console.log("come here - GET 2", uri)
             // We check here if IOS didn't delete the cache content
             RNFetchBlob.fs.exists(cache.path).then((exists) => {
                 if (exists) {
+                    // console.log("come here - GET 3", uri)
                     this.notify(uri);
                 }
                 else {
+                    // console.log("come here - GET 4", uri)
                     // console.log("come into cache and not found in cache so need to redownload", cache.source.headers)
                     this.download(cache);
                 }
             });
         }
         else {
-            // file path doesn't exist in cache yet...
-            if (cache.attemptCount === 0) {
-                // if first attempt, always download...
-                this.download(cache);
-            }
-            else if (cache.errorCode === 401 && cache.attemptCount == 1) {
-                // if second attempt, and first attempt was unauthorized, retry download...
-                this.download(cache);
-            }
-            else if (cache.errorCode === 401 && cache.attemptCount > 1 && cache.attemptCount < 10 && (Date.now() - cache.lastUpdatedTime > 60 * 1000)) {
-                // if the wait time is more then 1 mins, retry
-                this.download(cache);
+            // console.log("come here - GET 5", uri)
+            if (!cache.downloading) {
+                // file path doesn't exist in cache yet...
+                if (cache.attemptCount === 0) {
+                    // console.log("come here - GET 6", uri)
+                    // if first attempt, always download...
+                    this.download(cache);
+                }
+                else if (cache.errorCode === 401) {
+                    // console.log("come here - GET 7", uri)
+                    // allow retry for 401 with no limit
+                    this.download(cache);
+                }
+                else {
+                    // console.log("come here - GET 9", uri)
+                    // don't download, display default...
+                    this.notify(uri, cache.error);
+                }
             }
             else {
-                // don't download, display default...
-                this.notify(uri, cache.error);
+                // console.log("come here - GET 10 -- still downloading", uri)
             }
         }
     }
@@ -181,16 +195,18 @@ export class BaseCachedImage extends Component {
     constructor() {
         super();
         this.handler = (cache) => {
+            // console.log("come here - Handle 1", cache)
             if (cache.error) {
-                // console.log("Got error trying to update")
+                // console.log("come here - Handle 2", cache)
                 if (cache.suppessError !== true) {
-                    // bubble the event to handle token refresh...
-                    // console.log("Bubble event to top")
+                    // console.log("come here - Handle 3", cache)
                     this.bubbleEvent('onError', { error: cache.error });
                 }
+                // console.log("come here - Handle 4", cache)
                 this.setState({ error: cache.error, isLoading: cache.downloading });
             }
             else {
+                // console.log("come here - Handle 5", cache)
                 this.setState({ path: cache.path, error: undefined, isLoading: cache.downloading });
             }
         };
