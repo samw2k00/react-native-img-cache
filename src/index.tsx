@@ -66,6 +66,16 @@ export class ImageCache {
             });
         }
     }
+    clearStat(uri){
+        const cache = this.cache[uri];
+        if (cache) {
+            let path = this.getPath(uri, false);
+            cache.path = undefined;
+            cache.error = undefined;
+            cache.attemptCount = 0;
+            RNFetchBlob.fs.unlink(path);
+        }
+    }
     bust(uri, headers, suppessError) {
         const cache = this.cache[uri];
         if (cache !== undefined && !cache.immutable) {
@@ -96,8 +106,8 @@ export class ImageCache {
             this.notify(uri);
             // console.log("GET here download 1", uri)
             const method = source.method ? source.method : "GET";
-            let undoAttemptAndRetryAgainLater = () => {
-                // console.log("GET here download 7", uri)
+            let undoAttemptAndRetryAgainLater = (e) => {
+                // console.log("GET here download 7", uri, e)
                 // internet was not available
                 cache.attemptCount = 0;
                 cache.downloading = false;
@@ -107,16 +117,16 @@ export class ImageCache {
             };
             cache.task = RNFetchBlob.config({ path }).fetch(method, uri, source.headers);
             cache.task.then((res) => {
-                // console.log("GET here download 2", uri)
+                // console.log("GET here download 2", uri, res, path)
                 cache.downloading = false;
                 if (res.respInfo.status === 200) {
                     // console.log("GET here download 3", uri)
                     cache.path = path;
-                    cache.error = null
+                    cache.error = null;
                     this.notify(uri);
                 }
                 else {
-                    // console.log("GET here download 4", uri)
+                    //  console.log("GET here download 4", uri, res.respInfo.status)
                     if (res.respInfo.status === 202 || res.respInfo.status === 429 || res.respInfo.status === undefined) {
                         // cater for SNOW 202 and 429 when it reach max capacity
                         // https://community.servicenow.com/community/service-automation-platform/blog/2016/12/21/http-202-from-a-web-service-call
@@ -130,7 +140,7 @@ export class ImageCache {
                     // only suppress error if not 401 (i.e. let a handler try to re-auth)...
                     cache.suppessError = res.respInfo.status !== 401;
                     cache.errorCode = res.respInfo.status;
-                    cache.lastUpdatedTime = Date.now()
+                    cache.lastUpdatedTime = Date.now();
                     // notify the listener that there is an errorMessage
                     this.notify(uri, res);
                 }
@@ -164,7 +174,7 @@ export class ImageCache {
                     // if first attempt, always download...
                     this.download(cache);
                 }
-                else if (cache.errorCode === 401 ) {
+                else if (cache.errorCode === 401) {
                     // console.log("come here - GET 7", uri)
                     // allow retry for 401 with no limit
                     this.download(cache);
@@ -174,7 +184,8 @@ export class ImageCache {
                     // don't download, display default...
                     this.notify(uri, cache.error);
                 }
-            }else {
+            }
+            else {
                 // console.log("come here - GET 10 -- still downloading", uri)
             }
         }
@@ -290,3 +301,4 @@ export class CustomCachedImage extends BaseCachedImage {
         return React.createElement(Component, __assign({}, props), this.props.children);
     }
 }
+//# sourceMappingURL=index.js.map

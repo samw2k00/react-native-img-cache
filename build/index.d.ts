@@ -7,6 +7,7 @@ export declare class ImageCache {
     clear(): any;
     on(source: any, handler: any, immutable: any): void;
     dispose(uri: any, handler: any): void;
+    clearStat(uri: any): void;
     bust(uri: any, headers: any, suppessError: any): void;
     cancel(uri: any): void;
     download(cache: any): void;
